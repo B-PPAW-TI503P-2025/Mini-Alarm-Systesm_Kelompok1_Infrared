@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>IR Sensor Dashboard</title>
+  <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0"></script>
+  <script src="../js/theme.js"></script>
+  <style>
+    .pulse-animation { animation: pulse-glow 2s ease-in-out infinite; }
+    @keyframes pulse-glow {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.05); opacity: 0.8; }
+    }
+    .connection-status {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      padding: 10px 20px;
+      border-radius: 50px;
+      background: var(--bg-card);
+      box-shadow: var(--shadow);
+      border: 1px solid var(--border-color);
+      font-size: 0.85rem;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      z-index: 999;
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+    .status-dot.online { background: var(--success); box-shadow: 0 0 5px var(--success); }
+    .status-dot.offline { background: var(--danger); }
+  </style>
+</head>
+<body>
+  <div class="navbar">
+    <div class="navbar-content">
+      <h1><i class="fas fa-satellite-dish" style="color: var(--primary);"></i> IR Sensor Dashboard</h1>
+      <div class="navbar-right">
+        <button class="btn btn-icon" onclick="toggleTheme()" title="Toggle Theme">
+          <i id="themeIcon" class="fas fa-moon"></i>
+        </button>
+        <span><i class="fas fa-user-circle"></i> <span id="username">User</span></span>
+        <button class="btn btn-secondary" onclick="logout()"><i class="fas fa-sign-out-alt"></i> Logout</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="container">
+    <!-- Live Monitor Card -->
+    <div class="card">
+      <div class="card-header">
+        <span><i class="fas fa-broadcast-tower"></i> Live Monitor</span>
+        <span id="connectionStatus" style="font-size: 0.85rem; color: var(--text-muted);">
+          <span class="status-dot offline"></span> Connecting...
+        </span>
+      </div>
+      <div style="text-align: center; padding: 40px 20px;">
+        <div id="liveStatus" class="status-badge clear">
+          <span class="status-indicator green"></span>
+          <span>WAITING FOR SIGNAL</span>
+        </div>
+        <p id="lastSeen" style="margin-top: 20px; color: var(--text-muted); font-size: 0.95rem;">
+          <i class="fas fa-clock"></i> Waiting for first detection...
+        </p>
+      </div>
+    </div>
+
+    <!-- Stats Grid -->
+    <div class="grid">
+      <div class="stat-card">
+        <div class="stat-value" id="todayCount">
+          <i class="fas fa-spinner fa-pulse"></i>
+        </div>
+        <div class="stat-label"><i class="fas fa-calendar-day"></i> Today's Detections</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="totalCount">
+          <i class="fas fa-spinner fa-pulse"></i>
+        </div>
+        <div class="stat-label"><i class="fas fa-database"></i> Total Detections</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="lastDetection" style="font-size: 1.2rem;">-</div>
+        <div class="stat-label"><i class="fas fa-history"></i> Last Detection</div>
+      </div>
+    </div>
+
+    <!-- Activity Chart -->
+    <div class="card">
+      <div class="card-header">
+        <span><i class="fas fa-chart-bar"></i> Hourly Activity (Today)</span>
+        <button class="btn btn-secondary" onclick="loadChart()" style="padding: 5px 10px; font-size: 0.8rem;">
+          <i class="fas fa-sync-alt"></i> Refresh
+        </button>
+      </div>
+      <div style="padding: 30px 20px; height: 350px;">
+        <canvas id="activityChart"></canvas>
+      </div>
+    </div>
+
+    <!-- Recent Logs Table -->
+    <div class="card">
+      <div class="card-header">
+        <span><i class="fas fa-list-ul"></i> Recent Activity Logs</span>
+        <button class="btn btn-secondary" onclick="loadLogs()" style="padding: 5px 10px; font-size: 0.8rem;">
+          <i class="fas fa-sync-alt"></i> Refresh
+        </button>
+      </div>
+      <div style="overflow-x: auto;">
+        <table class="table">
+          <thead>
+            <tr>
+              <th><i class="fas fa-clock"></i> Timestamp</th>
+              <th><i class="fas fa-microchip"></i> Sensor ID</th>
+              <th><i class="fas fa-map-marker-alt"></i> Location</th>
+              <th><i class="fas fa-eye"></i> Status</th>
+            </tr>
+          </thead>
+          <tbody id="logsTable">
+            <tr>
+              <td colspan="4" style="text-align:center; padding: 40px; color: var(--text-muted);">
+                <i class="fas fa-spinner fa-pulse"></i> Loading logs...
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Connection Status Indicator -->
+  <div class="connection-status" id="sseStatus">
+    <span class="status-dot offline"></span>
+    <span>Disconnected</span>
+  </div>
+
+  <script>
+    // Theme Icon Init
+    document.addEventListener('DOMContentLoaded', () => {
+      const theme = localStorage.getItem('theme') || 'light';
+      document.getElementById('themeIcon').className = theme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
+    });
+
+    const API_URL = 'http://localhost:5000/api';
+    const token = localStorage.getItem('token');
+    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    
+    if (!token) {
+      window.location.href = 'login.html';
+    }
+    
+    document.getElementById('username').textContent = user.username;
+
+    function logout() {
+      localStorage.clear();
+      window.location.href = 'login.html';
+    }
+
+    // Fetch Helper
+    async function fetchAPI(endpoint) {
+      try {
+        const res = await fetch(`${API_URL}${endpoint}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (res.status === 401) {
+          logout();
+          return null;
+        }
+        return await res.json();
+      } catch(e) {
+        console.error('Fetch Error:', e);
+        return null;
+      }
+    }
+
+    // Load Stats
+    async function loadStats() {
+      const stats = await fetchAPI('/sensor/stats');
+      if (!stats) return;
+      
+      document.getElementById('todayCount').textContent = stats.today || 0;
+      document.getElementById('totalCount').textContent = stats.total || 0;
+      
+      if (stats.lastDetection) {
+        const lastTime = new Date(stats.lastDetection);
+        document.getElementById('lastDetection').textContent = lastTime.toLocaleTimeString('id-ID');
+      } else {
+        document.getElementById('lastDetection').textContent = '-';
+      }
+    }
+
+    // Load Chart
+    let chart;
+    async function loadChart() {
+      const data = await fetchAPI('/sensor/activity/hourly');
+      if (!data) return;
+      
+      const ctx = document.getElementById('activityChart').getContext('2d');
+      if (chart) chart.destroy();
+
+      const textColor = getComputedStyle(document.body).getPropertyValue('--text-muted').trim();
+      const primaryColor = getComputedStyle(document.body).getPropertyValue('--primary').trim();
+      
+      chart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: data.hours,
+          datasets: [{
+            label: 'Detections',
+            data: data.detections,
+            backgroundColor: primaryColor,
+            borderRadius: 6,
+            borderWidth: 0
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: 'rgba(0,0,0,0.8)',
+              padding: 12,
+              titleColor: '#fff',
+              bodyColor: '#fff',
+              borderColor: primaryColor,
+              borderWidth: 1
+            }
+          },
+          scales: {
+            y: {
+              beginAtZero: true,
+              ticks: { 
+                color: textColor,
+                stepSize: 1
+              },
+              grid: { color: 'rgba(128,128,128,0.1)' }
+            },
+            x: {
+              ticks: { color: textColor },
+              grid: { display: false }
+            }
+          }
+        }
+      });
+    }
+
+    // Load Logs
+    async function loadLogs() {
+      const data = await fetchAPI('/sensor/logs?limit=10');
+      const tbody = document.getElementById('logsTable');
+      
+      if (!data || !data.data || data.data.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="4" style="text-align:center; padding: 40px; color: var(--text-muted);">
+              <i class="fas fa-inbox"></i> No logs yet
+            </td>
+          </tr>
+        `;
+        return;
+      }
+      
+      tbody.innerHTML = data.data.map(log => {
+        const timestamp = new Date(log.timestamp);
+        const statusColor = log.detected ? 'var(--danger)' : 'var(--success)';
+        const statusIcon = log.detected ? 'fa-exclamation-triangle' : 'fa-check-circle';
+        const statusText = log.detected ? 'DETECTED' : 'CLEAR';
+        
+        return `
+          <tr>
+            <td>${timestamp.toLocaleString('id-ID')}</td>
+            <td><code style="background: var(--bg-body); padding: 4px 8px; border-radius: 4px;">${log.Sensor?.sensor_code || 'Unknown'}</code></td>
+            <td>${log.Sensor?.location || '-'}</td>
+            <td>
+              <span style="color: ${statusColor}; font-weight: 600;">
+                <i class="fas ${statusIcon}"></i> ${statusText}
+              </span>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    // Server-Sent Events (SSE) Connection
+    let evtSource;
+    let sseConnected = false;
+
+    function connectSSE() {
+      console.log('Connecting to SSE...');
+      evtSource = new EventSource(`${API_URL}/sensor/stream`);
+      
+      evtSource.onopen = () => {
+        console.log('✓ SSE Connected');
+        sseConnected = true;
+        updateConnectionStatus(true);
+      };
+      
+      evtSource.onmessage = (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          console.log('SSE Data:', data);
+          
+          if (data.type === 'connected') {
+            console.log('SSE Handshake OK');
+            return;
+          }
+          
+          if (data.type === 'update') {
+            updateLiveStatus(data);
+            loadStats();
+            loadChart();
+            loadLogs();
+          }
+        } catch (err) {
+          console.error('SSE Parse Error:', err);
+        }
+      };
+      
+      evtSource.onerror = (err) => {
+        console.error('✗ SSE Error:', err);
+        sseConnected = false;
+        updateConnectionStatus(false);
+        
+        // Auto reconnect after 5 seconds
+        setTimeout(() => {
+          console.log('Attempting to reconnect...');
+          evtSource.close();
+          connectSSE();
+        }, 5000);
+      };
+    }
+
+    function updateLiveStatus(data) {
+      const statusDiv = document.getElementById('liveStatus');
+      const lastSeenDiv = document.getElementById('lastSeen');
+      
+      if (data.detected) {
+        statusDiv.className = 'status-badge detected pulse-animation';
+        statusDiv.innerHTML = `
+          <span class="status-indicator red"></span>
+          <span>⚠️ OBJECT DETECTED</span>
+        `;
+      } else {
+        statusDiv.className = 'status-badge clear';
+        statusDiv.innerHTML = `
+          <span class="status-indicator green"></span>
+          <span>✓ NO OBJECT</span>
+        `;
+      }
+      
+      const timestamp = new Date(data.timestamp);
+      lastSeenDiv.innerHTML = `
+        <i class="fas fa-clock"></i> Last update: ${timestamp.toLocaleString('id-ID')}
+        <br>
+        <small style="color: var(--text-muted);">Sensor: ${data.sensor} | Location: ${data.location}</small>
+      `;
+    }
+
+    function updateConnectionStatus(connected) {
+      const statusDiv = document.getElementById('sseStatus');
+      const headerStatus = document.getElementById('connectionStatus');
+      
+      if (connected) {
+        statusDiv.innerHTML = '<span class="status-dot online"></span><span>Live Connected</span>';
+        headerStatus.innerHTML = '<span class="status-dot online"></span> Live';
+      } else {
+        statusDiv.innerHTML = '<span class="status-dot offline"></span><span>Reconnecting...</span>';
+        headerStatus.innerHTML = '<span class="status-dot offline"></span> Offline';
+      }
+    }
+
+    // Initialize
+    loadStats();
+    loadChart();
+    loadLogs();
+    connectSSE();
+
+    // Cleanup on page unload
+    window.addEventListener('beforeunload', () => {
+      if (evtSource) evtSource.close();
+    });
+  </script>
+</body>
+</html>
