@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login - Smart IR</title>
+  <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="../js/theme.js"></script> </head>
+<body>
+  
+  <div style="position: absolute; top: 20px; right: 20px;">
+    <button class="btn btn-icon" onclick="toggleTheme()" title="Toggle Theme">
+      <i id="themeIcon" class="fas fa-moon"></i>
+    </button>
+  </div>
+
+  <div class="auth-container">
+    <div class="auth-box">
+      <h2 style="text-align: center; margin-bottom: 20px; color: var(--primary);">
+        <i class="fas fa-shield-alt"></i> Smart IR Monitor
+      </h2>
+      
+      <div id="alert"></div>
+
+      <form id="loginForm">
+        <div class="form-group">
+          <label class="form-label">Username</label>
+          <input type="text" class="form-input" id="username" required>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Password</label>
+          <input type="password" class="form-input" id="password" required>
+        </div>
+
+        <button type="submit" class="btn btn-primary" style="width: 100%; justify-content: center;">
+          Login
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    // Update icon on load
+    document.addEventListener('DOMContentLoaded', () => {
+      const theme = localStorage.getItem('theme') || 'light';
+      document.getElementById('themeIcon').className = theme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
+    });
+
+    const API_URL = 'http://localhost:5000/api';
+
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const username = document.getElementById('username').value;
+      const password = document.getElementById('password').value;
+      const alertDiv = document.getElementById('alert');
+
+      try {
+        const response = await fetch(`${API_URL}/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+        const data = await response.json();
+
+        if (response.ok) {
+          localStorage.setItem('token', data.token);
+          localStorage.setItem('user', JSON.stringify(data.user));
+          window.location.href = data.user.role === 'admin' ? 'admin.html' : 'dashboard.html';
+        } else {
+          alertDiv.innerHTML = `<div class="alert" style="background:var(--danger); color:white;">${data.message}</div>`;
+        }
+      } catch (error) {
+        alertDiv.innerHTML = `<div class="alert" style="background:var(--danger); color:white;">Connection error.</div>`;
+      }
+    });
+  </script>
+</body>
+</html>
