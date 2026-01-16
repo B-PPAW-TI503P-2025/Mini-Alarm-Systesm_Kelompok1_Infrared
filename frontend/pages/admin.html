@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Admin Panel</title>
+  <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="../js/theme.js"></script>
+</head>
+<body>
+  <div class="navbar">
+    <div class="navbar-content">
+      <h1><i class="fas fa-crown" style="color: #f59e0b;"></i> Admin Panel</h1>
+      <div class="navbar-right">
+        <button class="btn btn-icon" onclick="toggleTheme()"><i id="themeIcon" class="fas fa-moon"></i></button>
+        <span id="username">Admin</span>
+        <button class="btn btn-primary" onclick="location.href='dashboard.html'">
+          <i class="fas fa-chart-line"></i> View Dashboard
+        </button>
+        <button class="btn btn-secondary" onclick="logout()">
+          <i class="fas fa-sign-out-alt"></i> Logout
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="grid">
+      <div class="stat-card">
+        <div class="stat-value" id="totalUsers">...</div>
+        <div class="stat-label"><i class="fas fa-users"></i> Total Users</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="activeSensors">...</div>
+        <div class="stat-label"><i class="fas fa-broadcast-tower"></i> Active Sensors</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="totalLogs">...</div>
+        <div class="stat-label"><i class="fas fa-database"></i> Total Logs</div>
+      </div>
+    </div>
+
+    <div class="grid" style="grid-template-columns: 2fr 1fr;">
+      
+      <div class="card">
+        <div class="card-header">
+          <span><i class="fas fa-users"></i> User Management</span>
+          <button class="btn btn-primary" onclick="openModal()" style="font-size:0.8rem; padding:5px 12px;">
+            <i class="fas fa-plus"></i> Add User
+          </button>
+        </div>
+        <div style="overflow-x:auto;">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Username</th>
+                <th>Email</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="usersTable">
+              <tr><td colspan="5" style="text-align:center">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:1.5rem;">
+         <div class="card">
+            <div class="card-header"><i class="fas fa-cogs"></i> Admin Actions</div>
+            <div style="padding:1.5rem; display:flex; flex-direction:column; gap:10px;">
+                <button class="btn btn-primary" onclick="exportLogs()">
+                  <i class="fas fa-file-csv"></i> Export CSV
+                </button>
+                <button class="btn btn-danger" onclick="cleanupLogs()">
+                  <i class="fas fa-trash-alt"></i> Cleanup Old Logs
+                </button>
+            </div>
+         </div>
+
+         <div class="card">
+            <div class="card-header"><i class="fas fa-microchip"></i> Sensors</div>
+            <div id="sensorsInfo" style="padding:1.5rem; font-size: 0.9rem; color: var(--text-muted);">
+              Loading sensors...
+            </div>
+         </div>
+      </div>
+
+    </div>
+  </div>
+
+  <div id="userModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header" style="display:flex; justify-content:space-between; margin-bottom:1rem;">
+        <h3><i class="fas fa-user-plus"></i> Add New User</h3>
+        <span class="close" onclick="closeModal()">&times;</span>
+      </div>
+      <form id="addUserForm">
+        <div class="form-group">
+            <label class="form-label">Username</label>
+            <input type="text" id="newUsername" class="form-input" required placeholder="Enter username">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Email</label>
+            <input type="email" id="newEmail" class="form-input" placeholder="user@example.com">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Password</label>
+            <input type="password" id="newPassword" class="form-input" required placeholder="Minimum 8 characters">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Role</label>
+            <select id="newRole" class="form-input">
+                <option value="user">User</option>
+                <option value="admin">Admin</option>
+            </select>
+        </div>
+        <button type="submit" class="btn btn-primary" style="width:100%">
+          <i class="fas fa-check"></i> Create User
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    // Theme Icon Init
+    document.addEventListener('DOMContentLoaded', () => {
+      const theme = localStorage.getItem('theme') || 'light';
+      document.getElementById('themeIcon').className = theme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
+    });
+
+    const API_URL = 'http://localhost:5000/api';
+    const token = localStorage.getItem('token');
+    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    
+    if (!token || user.role !== 'admin') {
+      alert('Access denied. Admin only.');
+      window.location.href = 'login.html';
+    }
+    
+    document.getElementById('username').textContent = user.username;
+
+    function logout() { 
+      localStorage.clear(); 
+      window.location.href = 'login.html'; 
+    }
+
+    async function fetchAPI(endpoint, opts={}) {
+        const res = await fetch(`${API_URL}${endpoint}`, { 
+          ...opts, 
+          headers: { 
+            'Authorization': `Bearer ${token}`, 
+            'Content-Type': 'application/json', 
+            ...opts.headers 
+          } 
+        });
+        if (res.status === 401) logout();
+        return res;
+    }
+
+    // Load Dashboard Stats
+    async function loadData() {
+        try {
+          const res = await fetchAPI('/admin/dashboard');
+          const data = await res.json();
+          
+          document.getElementById('totalUsers').textContent = data.users.total;
+          document.getElementById('activeSensors').textContent = data.sensors.active;
+          document.getElementById('totalLogs').textContent = data.logs.toLocaleString();
+
+          // Load Users
+          const usersRes = await fetchAPI('/admin/users');
+          const users = await usersRes.json();
+          
+          document.getElementById('usersTable').innerHTML = users.map(u => `
+              <tr>
+                  <td><strong>${u.username}</strong></td>
+                  <td>${u.email || '-'}</td>
+                  <td><span style="color:var(--primary); font-weight:600;">${u.role.toUpperCase()}</span></td>
+                  <td>
+                    <span style="color: ${u.is_active ? 'var(--success)' : 'var(--danger)'}">
+                      <i class="fas fa-circle" style="font-size:8px;"></i> 
+                      ${u.is_active ? 'Active' : 'Inactive'}
+                    </span>
+                  </td>
+                  <td>
+                    <button class="btn btn-secondary" style="padding:4px 10px; font-size:0.75rem;" 
+                            onclick="toggleUser(${u.id})">
+                      <i class="fas fa-exchange-alt"></i> Toggle
+                    </button>
+                  </td>
+              </tr>
+          `).join('');
+
+          // Load Sensors Info
+          const sensorsRes = await fetchAPI('/admin/sensors');
+          const sensors = await sensorsRes.json();
+          
+          const sensorsDiv = document.getElementById('sensorsInfo');
+          if (sensors.length === 0) {
+            sensorsDiv.innerHTML = '<p style="color:var(--text-muted);">No sensors registered yet.</p>';
+          } else {
+            sensorsDiv.innerHTML = sensors.map(s => `
+              <div style="margin-bottom: 12px; padding: 10px; background: var(--bg-body); border-radius: 6px;">
+                <div style="font-weight: 600; color: var(--text-main);">
+                  <i class="fas fa-microchip"></i> ${s.sensor_code}
+                </div>
+                <div style="font-size: 0.85rem; color: var(--text-muted); margin-top: 4px;">
+                  <i class="fas fa-map-marker-alt"></i> ${s.location || 'No location'}
+                </div>
+                <div style="font-size: 0.85rem; margin-top: 4px;">
+                  Status: <span style="color: ${s.status === 'active' ? 'var(--success)' : 'var(--danger)'}">
+                    ${s.status}
+                  </span>
+                </div>
+              </div>
+            `).join('');
+          }
+
+        } catch(err) {
+          console.error('Load error:', err);
+        }
+    }
+
+    // Modal Logic
+    const modal = document.getElementById('userModal');
+    function openModal() { modal.style.display = 'flex'; }
+    function closeModal() { modal.style.display = 'none'; }
+    window.onclick = (e) => { if(e.target == modal) closeModal(); }
+
+    // Add User Form
+    document.getElementById('addUserForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        const username = document.getElementById('newUsername').value;
+        const email = document.getElementById('newEmail').value;
+        const password = document.getElementById('newPassword').value;
+        const role = document.getElementById('newRole').value;
+        
+        try {
+          const res = await fetchAPI('/auth/register', { 
+            method: 'POST', 
+            body: JSON.stringify({ username, email, password, role }) 
+          });
+          
+          const data = await res.json();
+          
+          if (res.ok) {
+            alert('User created successfully!');
+            closeModal();
+            loadData();
+            document.getElementById('addUserForm').reset();
+          } else {
+            alert(data.message || 'Failed to create user');
+          }
+        } catch(err) {
+          alert('Error creating user');
+          console.error(err);
+        }
+    });
+
+    // Toggle User Status
+    async function toggleUser(id) {
+        if(confirm('Are you sure you want to change this user status?')) {
+          try {
+            const res = await fetchAPI(`/admin/users/${id}/toggle`, {method:'PATCH'});
+            const data = await res.json();
+            
+            if (res.ok) {
+              alert(data.message);
+              loadData();
+            } else {
+              alert(data.message || 'Failed to toggle user');
+            }
+          } catch(err) {
+            alert('Error toggling user status');
+            console.error(err);
+          }
+        }
+    }
+
+    // Export CSV - FIXED VERSION
+    function exportLogs() {
+      const exportUrl = `${API_URL}/sensor/export/logs`;
+      
+      // Create temporary link for download
+      fetch(exportUrl, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      })
+      .then(response => {
+        if (!response.ok) {
+          throw new Error('Export failed');
+        }
+        return response.blob();
+      })
+      .then(blob => {
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', `sensor_logs_${Date.now()}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+        
+        alert('CSV exported successfully!');
+      })
+      .catch(err => {
+        console.error('Export error:', err);
+        alert('Failed to export CSV. Please check if there is data in the database.');
+      });
+    }
+
+    // Cleanup Old Logs
+    async function cleanupLogs() {
+      const days = prompt('Delete logs older than how many days?', '30');
+      
+      if (days && !isNaN(days)) {
+        if(confirm(`This will delete all logs older than ${days} days. Continue?`)) {
+          try {
+            const res = await fetchAPI(`/admin/logs/cleanup?days=${days}`, {method:'DELETE'});
+            const data = await res.json();
+            
+            if (res.ok) {
+              alert(`Cleanup completed! ${data.deleted} logs deleted.`);
+              loadData();
+            } else {
+              alert('Failed to cleanup logs');
+            }
+          } catch(err) {
+            alert('Error during cleanup');
+            console.error(err);
+          }
+        }
+      }
+    }
+
+    // Initialize
+    loadData();
+  </script>
+</body>
+</html>
